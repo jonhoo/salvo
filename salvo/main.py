@@ -1,7 +1,9 @@
 import sys
 import boto3
+import os.path
 import argparse
 from time import sleep
+from multiprocessing import Pool
 from salvo.topology import Topology, Cluster
 
 
@@ -13,6 +15,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='Provision a new salvo.')
     parser.add_argument('config', type=argparse.FileType('r'),
                         help='salvo configuration file to run')
+    parser.add_argument('--playbook', '-p', type=argparse.FileType('r'),
+                        default='./deploy/playbook.yml',
+                        help='directory where playbooks reside')
     parser.add_argument('--deployment', '-d', type=str, default='salvo',
                         help='deployment name for this salvo')
     parser.add_argument('--set', '-s', nargs='*', type=str,
@@ -24,6 +29,7 @@ def main(argv=None):
     args.dry_run = True  # TODO: remove before release
 
     args.set = dict(item.split(":", maxsplit=1) for item in args.set)
+    playdir = os.path.dirname(os.path.abspath(args.playbook))
     topology = Topology.load_file(args.config, args.set)
 
     hq = Cluster('hq', {
@@ -79,7 +85,7 @@ def main(argv=None):
     keys = ec2.KeyPair(keys['KeyName'])
 
     # Launch instances
-    instances = [
+    clusters = [
         subnets[i].create_instances(
                 DryRun=args.dry_run,
                 KeyName=keys.name,
@@ -92,16 +98,59 @@ def main(argv=None):
         for i, c in enumerate(topology.clusters)]
 
     try:
-        hq = instances[0][0]
-        while hq.state == 'pending':
+        hq = clusters[0][0]
+        while hq.state['Name'] == 'pending':
             sleep(0.5)
             hq.load()
-        if hq.state != 'running':
+        if hq.state['Name'] != 'running':
             raise ChildProcessError(hq.state_reason['Message'])
 
-        # XXX: start setting up hq
-        # XXX: set up other machines from hq
-        # XXX: detect when all workers finish...
+        # XXX: start deployment master on hq
+
+        def prepare(ci, instance):
+            global hq
+            print("setup {} as {} through {}",
+                  instance.private_ip_address,
+                  topology.clusters[ci].role,
+                  hq.public_ip_address)
+            # XXX: set hq.private_ip_address as master in /etc/hosts
+            # XXX: start deployment slave on instance
+
+        done = []
+        p = Pool(5)
+        pending = True
+        while pending:
+            pending = False
+            for i, cluster in enumerate(clusters):
+                for ii, instance in enumerate(cluster):
+                    if i.state['Name'] == 'pending':
+                        pending = True
+                        i.load()
+                        break
+                    elif i.state['Name'] != 'running':
+                        raise ChildProcessError(i.state_reason['Message'])
+                    else:
+                        # State is now 'running'
+                        tag = (i, ii)
+                        if tag not in done:
+                            # State hasn't been 'running' before
+                            done.append(tag)
+                            p.apply_async(prepare, [i, instance])
+                if pending:
+                    break
+        p.close()
+        p.join()
+
+        with open(os.path.join(playdir, "hosts"), "w") as hosts:
+            print("- hosts:", file=hosts)
+            for ci, cluster in enumerate(clusters):
+                print("  - {}:".format(topology.clusters[ci].role), file=hosts)
+                for instance in cluster:
+                    print(
+                        "    - {}".format(instance.private_ip_address),
+                        file=hosts
+                    )
+
     except Exception as e:
         print("An error occurred: {}".format(e))
     finally:

@@ -73,11 +73,16 @@ def main(argv=None):
                         'Value': args.deployment,
                     }])
 
+    # Create access keys
+    keys = client.create_key_pair(DryRun=args.dry_run,
+                                  KeyName=args.deployment)
+    keys = ec2.KeyPair(keys['KeyName'])
+
     # Launch instances
     instances = [
         subnets[i].create_instances(
                 DryRun=args.dry_run,
-                # KeyName = ,
+                KeyName=keys.name,
                 # SecurityGroupIds = ,
                 ImageId=c.attrs['image'],
                 MinCount=c.attrs['count'],
@@ -107,5 +112,6 @@ def main(argv=None):
         gateway.detach_from_vpc(DryRun=args.dry_run, VpcId=vpc.id)
         gateway.delete(DryRun=args.dry_run)
         vpc.delete(DryRun=args.dry_run)
+        keys.delete(DryRun=args.dry_run)
 
     return 0

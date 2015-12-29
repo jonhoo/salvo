@@ -34,7 +34,7 @@ def main(argv=None):
 
     hq = Cluster('hq', {
         'public': True,
-        'role': 'salvo-hq',
+        'role': 'bastion',
     }, {})
     topology.clusters = [hq] + topology.clusters
 
@@ -105,16 +105,13 @@ def main(argv=None):
         if hq.state['Name'] != 'running':
             raise ChildProcessError(hq.state_reason['Message'])
 
-        # XXX: start deployment master on hq
-
         def prepare(ci, instance):
             global hq
             print("setup {} as {} through {}",
                   instance.private_ip_address,
                   topology.clusters[ci].role,
                   hq.public_ip_address)
-            # XXX: set hq.private_ip_address as master in /etc/hosts
-            # XXX: start deployment slave on instance
+            # XXX: wait for machine to actually be available?
 
         done = []
         p = Pool(5)
@@ -141,15 +138,48 @@ def main(argv=None):
         p.close()
         p.join()
 
-        with open(os.path.join(playdir, "hosts"), "w") as hosts:
-            print("- hosts:", file=hosts)
+        # Write out inventory
+        with open(os.path.join(playdir, "inventory"), "w") as hosts:
             for ci, cluster in enumerate(clusters):
-                print("  - {}:".format(topology.clusters[ci].role), file=hosts)
+                print("[{}]".format(topology.clusters[ci].role), file=hosts)
                 for instance in cluster:
                     print(
                         "    - {}".format(instance.private_ip_address),
                         file=hosts
                     )
+                print("", file=hosts)
+
+        # Set up all SSH connections to proxy through hq
+###############################################################################
+        # https://medium.com/@paulskarseth/ansible-bastion-host-proxycommand-e6946c945d30
+        with open(os.path.join(playdir, "ssh.cfg"), "w") as sshcfg:
+            from itertools import chain
+            ips = list(chain.from_iterable(
+                clusters.map(lambda c: c.map(
+                    lambda i: i.private_ip_address
+                    )
+                )
+            ))
+
+            print("""
+Host {}
+  ProxyCommand    ssh -W %h:%p {}
+Host *
+  UserName        ubuntu
+  ControlMaster   auto
+  ControlPath     ~/.ssh/mux-%r@%h:%p
+  ControlPersist  15m
+""".format(" ".join(ips), hq.public_ip_address), file=sshcfg)
+
+        with open(os.path.join(playdir, "ansible.cfg"), "w") as anscfg:
+            print("""
+[ssh_connection]
+ssh_args = -F "{}"
+control_path = ~/.ssh/mux-%r@%h:%p
+""".format(os.path.join(playdir, "ssh.cfg")), file=anscfg)
+###############################################################################
+
+        # XXX: run ansible command
 
     except Exception as e:
         print("An error occurred: {}".format(e))

@@ -9,11 +9,11 @@ from builtins import (
 
 import sys
 import boto3
-import os.path
 import argparse
 from time import sleep
 from multiprocessing import Pool
 from salvo.topology import Topology, Cluster
+from salvo.deploy import Deployer
 
 
 def main(argv=None):
@@ -119,7 +119,6 @@ def main(argv=None):
                   topology.clusters[ci].role,
                   instance.private_ip_address,
                   hq.public_ip_address)
-            # XXX: wait for machine to actually be available?
 
         done = []
         p = Pool(5)
@@ -145,54 +144,26 @@ def main(argv=None):
                             p.apply_async(prepare, [i, instance])
                 if pending:
                     break
+            sleep(3)
         p.close()
         p.join()
 
-        # Write out inventory
-        with open(os.path.join(playdir, "inventory"), "w") as hosts:
-            for ci, cluster in enumerate(clusters):
-                print("[{}]".format(topology.clusters[ci].role), file=hosts)
-                for instance in cluster:
-                    print(
-                        "    - {}".format(instance.private_ip_address),
-                        file=hosts
-                    )
-                print("", file=hosts)
+        # Wait for hq to be pingable
+        deployment = Deployer(args.playbook.name, topology, keymat, clusters)
+        while not deployment.test(hq.public_ip_address):
+            sleep(1)
 
-        # Set up all SSH connections to proxy through hq
-###############################################################################
-        # https://medium.com/@paulskarseth/ansible-bastion-host-proxycommand-e6946c945d30
-        with open(os.path.join(playdir, "ssh.cfg"), "w") as sshcfg:
-            from itertools import chain
-            ips = list(chain.from_iterable(
-                clusters.map(lambda c: c.map(
-                    lambda i: i.private_ip_address
-                    )
-                )
-            ))
+        # Wait for workers to be pingable
+        for i, cluster in enumerate(clusters):
+            for ii, instance in enumerate(cluster):
+                while not deployment.test(instance.private_ip_address):
+                    sleep(1)
 
-            print("""
-Host {}
-  ProxyCommand    ssh -W %h:%p {}
-Host *
-  UserName        ubuntu
-  ControlMaster   auto
-  ControlPath     ~/.ssh/mux-%r@%h:%p
-  ControlPersist  15m
-""".format(" ".join(ips), hq.public_ip_address), file=sshcfg)
-
-        with open(os.path.join(playdir, "ansible.cfg"), "w") as anscfg:
-            print("""
-[ssh_connection]
-ssh_args = -F "{}"
-control_path = ~/.ssh/mux-%r@%h:%p
-""".format(os.path.join(playdir, "ssh.cfg")), file=anscfg)
-###############################################################################
-
-        # XXX: run ansible command
-
-    except Exception as e:
-        print("An error occurred: {}".format(e))
+        # Deploy!
+        exit = deployment.deploy()
+    except:
+        import traceback
+        traceback.print_exc()
     finally:
         # Terminate instances and delete VPC resources
         vpc.instances.terminate(DryRun=args.dry_run)

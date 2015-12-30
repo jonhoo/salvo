@@ -62,7 +62,10 @@ setup(
 
     packages=find_packages(exclude=['contrib', 'docs', 'tests']),
 
-    install_requires=['boto3'],
+    install_requires=['future', 'boto3', 'ansible>=2.0.0'],
+    dependency_links=[
+        "git+https://github.com/ansible/ansible@devel#egg=ansible-2.1.0"
+    ],
 
     # $ pip install -e .[dev,test]
     extras_require={

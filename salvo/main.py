@@ -103,6 +103,7 @@ def main(argv=None):
     # Create access keys
     keys = client.create_key_pair(DryRun=args.dry_run,
                                   KeyName=args.deployment)
+    keymat = keys['KeyMaterial']
     keys = ec2.KeyPair(keys['KeyName'])
 
     # Launch instances

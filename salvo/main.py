@@ -53,6 +53,18 @@ def main(argv=None):
     vpc = client.create_vpc(DryRun=args.dry_run, CidrBlock='10.0.0.0/16')
     vpc = ec2.Vpc(vpc['Vpc']['VpcId'])
 
+    sec = vpc.create_security_group(
+        DryRun=args.dry_run,
+        GroupName=args.deployment,
+        Description='SSH ingress for {}'.format(args.deployment)
+    )
+    sec.authorize_ingress(DryRun=args.dry_run,
+                          IpProtocol='tcp',
+                          FromPort=22,
+                          ToPort=22,
+                          CidrIp='0.0.0.0/0'
+                          )
+
     gateway = client.create_internet_gateway(DryRun=args.dry_run)
     gateway = ec2.InternetGateway(
             gateway['InternetGateway']['InternetGatewayId']
@@ -79,6 +91,7 @@ def main(argv=None):
     ec2.create_tags(DryRun=args.dry_run,
                     Resources=[
                         vpc.id,
+                        sec.id,
                         gateway.id,
                         iroutable.id,
                     ] + [sn.id for sn in subnets],
@@ -93,22 +106,36 @@ def main(argv=None):
     keys = ec2.KeyPair(keys['KeyName'])
 
     # Launch instances
-    clusters = [
-        subnets[i].create_instances(
-                DryRun=args.dry_run,
-                KeyName=keys.name,
-                # SecurityGroupIds = ,
-                ImageId=c.attrs['image'],
-                MinCount=c.attrs['count'],
-                MaxCount=c.attrs['count'],
-                InstanceType=c.attrs['itype'],
-                InstanceInitiatedShutdownBehavior='terminate')
-        for i, c in enumerate(topology.clusters)]
+    clusters = []
+    for i, c in enumerate(topology.clusters):
+        nics = [
+            {
+                "DeviceIndex": 0,
+                "Groups": [sec.id],
+                "SubnetId": subnets[i].id,
+                "DeleteOnTermination": True,
+                "AssociatePublicIpAddress": c.public,
+            }
+        ]
+
+        clusters.append(list(map(lambda x: ec2.Instance(x), [
+            instance['InstanceId']
+            for instance in client.run_instances(
+               DryRun=args.dry_run,
+               KeyName=keys.name,
+               NetworkInterfaces=nics,
+               ImageId=c.attrs['image'],
+               MinCount=c.attrs['count'],
+               MaxCount=c.attrs['count'],
+               InstanceType=c.attrs['itype'],
+               InstanceInitiatedShutdownBehavior='terminate'
+               )['Instances']
+        ])))
 
     try:
         hq = clusters[0][0]
         while hq.state['Name'] == 'pending':
-            sleep(0.5)
+            sleep(3)
             hq.load()
         if hq.state['Name'] != 'running':
             raise ChildProcessError(hq.state_reason['Message'])
@@ -179,6 +206,7 @@ def main(argv=None):
         except:
             import traceback
             traceback.print_exc()
+        sec.delete()
         for i in vpc.network_interfaces.all():
             i.delete(DryRun=args.dry_run)
         vpc.delete(DryRun=args.dry_run)

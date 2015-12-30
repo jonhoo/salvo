@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python2
 
 # Always prefer setuptools over distutils
 from setuptools import setup, find_packages
@@ -55,7 +55,7 @@ setup(
 
         'License :: OSI Approved :: MIT License',
 
-        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 2',
     ],
 
     keywords='deployment cloud-computing distributed-computing',

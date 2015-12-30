@@ -35,10 +35,9 @@ def main(argv=None):
                         help='only print what actions would be taken')
     args = parser.parse_args(argv)
 
-    args.dry_run = True  # TODO: remove before release
-
-    args.set = dict(item.split(":", maxsplit=1) for item in args.set)
-    playdir = os.path.dirname(os.path.abspath(args.playbook))
+    args.set = dict(
+            item.split(":", maxsplit=1) for item in args.set
+            ) if args.set is not None else {}
     topology = Topology.load_file(args.config, args.set)
 
     hq = Cluster('hq', {
@@ -70,7 +69,7 @@ def main(argv=None):
         subnet = vpc.create_subnet(DryRun=args.dry_run,
                                    CidrBlock='10.0.{}.0/24'.format(i))
 
-        if topology.public:
+        if c.public:
             iroutable.associate_with_subnet(DryRun=args.dry_run,
                                             SubnetId=subnet.id)
 
@@ -116,9 +115,9 @@ def main(argv=None):
 
         def prepare(ci, instance):
             global hq
-            print("setup {} as {} through {}",
-                  instance.private_ip_address,
+            print("{} on {} now available through {}",
                   topology.clusters[ci].role,
+                  instance.private_ip_address,
                   hq.public_ip_address)
             # XXX: wait for machine to actually be available?
 
@@ -129,12 +128,14 @@ def main(argv=None):
             pending = False
             for i, cluster in enumerate(clusters):
                 for ii, instance in enumerate(cluster):
-                    if i.state['Name'] == 'pending':
+                    if instance.state['Name'] == 'pending':
                         pending = True
-                        i.load()
+                        instance.load()
                         break
-                    elif i.state['Name'] != 'running':
-                        raise ChildProcessError(i.state_reason['Message'])
+                    elif instance.state['Name'] != 'running':
+                        raise ChildProcessError(
+                            instance.state_reason['Message']
+                        )
                     else:
                         # State is now 'running'
                         tag = (i, ii)
@@ -195,11 +196,20 @@ control_path = ~/.ssh/mux-%r@%h:%p
     finally:
         # Terminate instances and delete VPC resources
         vpc.instances.terminate(DryRun=args.dry_run)
-        for sn in subnets:
-            sn.delete(DryRun=args.dry_run)
+        keys.delete(DryRun=args.dry_run)
+        for r in iroutable.associations.all():
+            r.delete(DryRun=args.dry_run)
+        iroutable.delete(DryRun=args.dry_run)
         gateway.detach_from_vpc(DryRun=args.dry_run, VpcId=vpc.id)
         gateway.delete(DryRun=args.dry_run)
+        try:
+            for sn in subnets:
+                sn.delete(DryRun=args.dry_run)
+        except:
+            import traceback
+            traceback.print_exc()
+        for i in vpc.network_interfaces.all():
+            i.delete(DryRun=args.dry_run)
         vpc.delete(DryRun=args.dry_run)
-        keys.delete(DryRun=args.dry_run)
 
-    return 0
+    return exit

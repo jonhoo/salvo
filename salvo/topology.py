@@ -34,7 +34,7 @@ class Cluster:
         self.name = name
         self.attrs = {
             "public": False,
-            "image": "ami-60b6c60a",  # Amazon Linux AMI 2015.09.1
+            "image": "ami-d05e75b8",  # Ubuntu Server 14.04 LTS
             "itype": "t2.nano",
             "role": None,
             "count": 1,
@@ -42,7 +42,7 @@ class Cluster:
 
         for k, v in attrs.items():
             if k in self.attrs:
-                if v.startswith('$'):
+                if isinstance(v, str) and v.startswith('$'):
                     self.attrs[k] = params[attrs[k].lstrip('$')]
                 else:
                     self.attrs[k] = attrs[k]
@@ -50,3 +50,8 @@ class Cluster:
                 raise KeyError("Unknown cluster attribute '{}'".format(k))
 
         assert self.attrs['role'] is not None
+
+    def __getattr__(self, name):
+        if name in self.attrs:
+            return self.attrs[name]
+        raise AttributeError(name)

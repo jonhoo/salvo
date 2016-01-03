@@ -53,16 +53,24 @@ def main(argv=None):
     vpc = client.create_vpc(DryRun=args.dry_run, CidrBlock='10.0.0.0/16')
     vpc = ec2.Vpc(vpc['Vpc']['VpcId'])
 
+    # allow ssh to all hosts
     sec = vpc.create_security_group(
         DryRun=args.dry_run,
         GroupName=args.deployment,
-        Description='SSH ingress for {}'.format(args.deployment)
+        Description='Worker SSH and hq ingress in {}'.format(args.deployment)
     )
     sec.authorize_ingress(DryRun=args.dry_run,
                           IpProtocol='tcp',
                           FromPort=22,
                           ToPort=22,
                           CidrIp='0.0.0.0/0'
+                          )
+    # allow all internal traffic
+    sec.authorize_ingress(DryRun=args.dry_run,
+                          IpProtocol='tcp',
+                          FromPort=1,
+                          ToPort=65535,
+                          CidrIp='10.0.0.0/16'
                           )
 
     gateway = client.create_internet_gateway(DryRun=args.dry_run)

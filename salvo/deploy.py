@@ -24,7 +24,7 @@ class Deployer:
         # Write out inventory
         with open("inventory", "w") as hosts:
             for ci, cluster in enumerate(clusters):
-                print("[{}]".format(topology.clusters[ci].role), file=hosts)
+                print("[{}]".format(topology.clusters[ci].name), file=hosts)
                 for instance in cluster:
                     print(
                         "{}".format(

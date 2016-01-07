@@ -46,7 +46,6 @@ def main(argv=None):
 
     hq = Cluster('hq', {
         'public': True,
-        'role': 'bastion',
     }, {})
     topology.clusters = [hq] + topology.clusters
 
@@ -183,9 +182,9 @@ def main(argv=None):
 
         def prepare(ci, instance):
             global hq
-            print("{} on {} now available through {}",
-                  topology.clusters[ci].role,
+            print("instance {} in {} now available through {}",
                   instance.private_ip_address,
+                  topology.clusters[ci].name,
                   hq.public_ip_address)
 
         agenda.task("Wait for workers to reach 'running' state")

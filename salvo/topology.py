@@ -36,7 +36,6 @@ class Cluster:
             "public": False,
             "image": "ami-d05e75b8",  # Ubuntu Server 14.04 LTS
             "itype": "t2.nano",
-            "role": None,
             "count": 1,
         }
 
@@ -48,8 +47,6 @@ class Cluster:
                     self.attrs[k] = attrs[k]
             elif k != "name":
                 raise KeyError("Unknown cluster attribute '{}'".format(k))
-
-        assert self.attrs['role'] is not None
 
     def __getattr__(self, name):
         if name in self.attrs:

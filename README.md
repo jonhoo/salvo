@@ -46,6 +46,11 @@ A more involved example might look as follows:
 }
 ```
 
+Salvo always provisions one extra host called `hq`, in its own cluster,
+which has a public IP address, and which exposes SSH over the internet.
+This is a bastion host used to access the other machines which all have
+only private IP addresses.
+
 ## Machine configuration
 
 Machine configuration and application deployment is done with Ansible.

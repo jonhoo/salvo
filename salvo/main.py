@@ -210,7 +210,18 @@ def main(argv=None):
         traceback.print_exc()
     finally:
         # Terminate instances and delete VPC resources
+        instances = list(vpc.instances.all())
         vpc.instances.terminate(DryRun=args.dry_run)
+        still_running = True
+        while still_running:
+            still_running = False
+            for i in instances:
+                i.load()
+                if i.state['Name'] != 'terminated':
+                    still_running = True
+                    sleep(1)
+                    break
+
         keys.delete(DryRun=args.dry_run)
         for r in iroutable.associations.all():
             r.delete(DryRun=args.dry_run)

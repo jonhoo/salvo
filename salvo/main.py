@@ -152,7 +152,10 @@ def main(argv=None):
             }
         ]
 
-        agenda.task("Launching instances in cluster #{}".format(i+1))
+        agenda.task(
+            "Launching {} instances in cluster {}"
+            .format(c.attrs['count'], c.name)
+        )
         clusters.append(list(map(lambda x: ec2.Instance(x), [
             instance['InstanceId']
             for instance in client.run_instances(

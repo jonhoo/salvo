@@ -15,6 +15,7 @@ from multiprocessing import Pool
 from salvo.topology import Topology, Cluster
 from salvo.deploy import Deployer
 import botocore
+import agenda
 
 
 def main(argv=None):
@@ -47,14 +48,18 @@ def main(argv=None):
     }, {})
     topology.clusters = [hq] + topology.clusters
 
+    agenda.section("Set up network")
+
     client = boto3.client('ec2')
     ec2 = boto3.resource('ec2')
 
     # Set up VPC
+    agenda.task("Create VPC")
     vpc = client.create_vpc(DryRun=args.dry_run, CidrBlock='10.0.0.0/16')
     vpc = ec2.Vpc(vpc['Vpc']['VpcId'])
 
     # allow ssh to all hosts
+    agenda.task("Create network security group")
     sec = vpc.create_security_group(
         DryRun=args.dry_run,
         GroupName=args.deployment,
@@ -74,12 +79,14 @@ def main(argv=None):
                           CidrIp='10.0.0.0/16'
                           )
 
+    agenda.task("Attach VPC internet gateway")
     gateway = client.create_internet_gateway(DryRun=args.dry_run)
     gateway = ec2.InternetGateway(
             gateway['InternetGateway']['InternetGatewayId']
     )
     gateway.attach_to_vpc(DryRun=args.dry_run, VpcId=vpc.id)
 
+    agenda.task("Create internet-enabled route for public instances")
     iroutable = vpc.create_route_table(DryRun=args.dry_run)
     iroutable.create_route(DryRun=args.dry_run,
                            DestinationCidrBlock='0.0.0.0/0',
@@ -87,16 +94,19 @@ def main(argv=None):
 
     subnets = []
     for i, c in enumerate(topology.clusters):
+        agenda.task("Allocate subnet #{}".format(i+1))
         subnet = vpc.create_subnet(DryRun=args.dry_run,
                                    CidrBlock='10.0.{}.0/24'.format(i))
 
         if c.public:
+            agenda.subtask("Hook in internet-enable route table")
             iroutable.associate_with_subnet(DryRun=args.dry_run,
                                             SubnetId=subnet.id)
 
         subnets.append(subnet)
 
     # Tag all our VPC resources
+    agenda.task("Tag all VPC resources")
     ec2.create_tags(DryRun=args.dry_run,
                     Resources=[
                         vpc.id,
@@ -110,17 +120,23 @@ def main(argv=None):
                     }])
 
     # Create access keys
+    agenda.task("Generate VPC key pair")
     try:
         keys = client.create_key_pair(DryRun=args.dry_run,
                                       KeyName=args.deployment)
     except botocore.exceptions.ClientError:
         # Key probably already exists. Delete and re-create.
+        agenda.subfailure("Could not create key pair")
+        agenda.subtask("Attempting to delete old key pair")
         client.delete_key_pair(DryRun=args.dry_run, KeyName=args.deployment)
+        agenda.subtask("Attempting to generate new key pair")
         keys = client.create_key_pair(DryRun=args.dry_run,
                                       KeyName=args.deployment)
 
     keymat = keys['KeyMaterial']
     keys = ec2.KeyPair(keys['KeyName'])
+
+    agenda.section("Launch instances")
 
     # Launch instances
     clusters = []
@@ -135,6 +151,7 @@ def main(argv=None):
             }
         ]
 
+        agenda.task("Launching instances in cluster #{}".format(i+1))
         clusters.append(list(map(lambda x: ec2.Instance(x), [
             instance['InstanceId']
             for instance in client.run_instances(
@@ -150,11 +167,16 @@ def main(argv=None):
         ])))
 
     try:
+        agenda.task("Wait for HQ to start running")
+
         hq = clusters[0][0]
         while hq.state['Name'] == 'pending':
+            agenda.subtask("Still in 'pending' state")
             sleep(3)
             hq.load()
+
         if hq.state['Name'] != 'running':
+            agenda.failure(hq.state_reason['Message'])
             raise ChildProcessError(hq.state_reason['Message'])
 
         def prepare(ci, instance):
@@ -164,6 +186,8 @@ def main(argv=None):
                   instance.private_ip_address,
                   hq.public_ip_address)
 
+        agenda.task("Wait for workers to reach 'running' state")
+
         done = []
         p = Pool(5)
         pending = True
@@ -172,10 +196,20 @@ def main(argv=None):
             for i, cluster in enumerate(clusters):
                 for ii, instance in enumerate(cluster):
                     if instance.state['Name'] == 'pending':
+                        agenda.subtask(
+                            "Instance {}.{} is still pending".format(i+1, ii+1)
+                        )
+
                         pending = True
                         instance.load()
                         break
                     elif instance.state['Name'] != 'running':
+                        agenda.subfailure(
+                            "Instance {}.{} failed: {}".format(
+                                i+1, ii+1,
+                                instance.state_reason['Message']
+                            )
+                        )
                         raise ChildProcessError(
                             instance.state_reason['Message']
                         )
@@ -192,10 +226,14 @@ def main(argv=None):
         p.close()
         p.join()
 
+        agenda.task("Wait for HQ to become pingable")
+
         # Wait for hq to be pingable
         deployment = Deployer(args.playbook.name, topology, keymat, clusters)
         while not deployment.test(hq.public_ip_address):
             sleep(1)
+
+        agenda.task("Wait for workers to become pingable")
 
         # Wait for workers to be pingable
         for i, cluster in enumerate(clusters):
@@ -204,12 +242,19 @@ def main(argv=None):
                     sleep(1)
 
         # Deploy!
+        agenda.section("Deploy application")
         exit = deployment.deploy()
     except:
         import traceback
         traceback.print_exc()
     finally:
+        agenda.section("Clean up VPC")
+
+        agenda.prompt("Press [Enter] when you are ready to clean")
+        input()
+
         # Terminate instances and delete VPC resources
+        agenda.task("Terminate all instances")
         instances = list(vpc.instances.all())
         vpc.instances.terminate(DryRun=args.dry_run)
         still_running = True
@@ -218,25 +263,37 @@ def main(argv=None):
             for i in instances:
                 i.load()
                 if i.state['Name'] != 'terminated':
+                    agenda.subtask("At least one instance still shutting down")
                     still_running = True
-                    sleep(1)
+                    sleep(2)
                     break
 
+        agenda.task("Delete network resources")
+        agenda.subtask("key pair")
         keys.delete(DryRun=args.dry_run)
+        agenda.subtask("internet-enabled route associations")
         for r in iroutable.associations.all():
             r.delete(DryRun=args.dry_run)
+        agenda.subtask("internet-enabled route table")
         iroutable.delete(DryRun=args.dry_run)
+        agenda.subtask("internet gateway")
         gateway.detach_from_vpc(DryRun=args.dry_run, VpcId=vpc.id)
         gateway.delete(DryRun=args.dry_run)
+        agenda.subtask("subnets")
         try:
             for sn in subnets:
                 sn.delete(DryRun=args.dry_run)
         except:
+            agenda.subfailure("failed to delete subnet:")
             import traceback
             traceback.print_exc()
+        agenda.subtask("security group")
         sec.delete()
+        agenda.subtask("network interfaces")
         for i in vpc.network_interfaces.all():
             i.delete(DryRun=args.dry_run)
+
+        agenda.task("Delete the VPC")
         vpc.delete(DryRun=args.dry_run)
 
     return exit

@@ -17,6 +17,8 @@ from salvo.deploy import Deployer
 import botocore
 import agenda
 
+# boto3.set_stream_logger(name='boto3')
+
 
 def main(argv=None):
     """The main entry-point to salvo."""

@@ -14,6 +14,7 @@ from time import sleep
 from multiprocessing import Pool
 from salvo.topology import Topology, Cluster
 from salvo.deploy import Deployer
+import botocore
 
 
 def main(argv=None):
@@ -109,8 +110,15 @@ def main(argv=None):
                     }])
 
     # Create access keys
-    keys = client.create_key_pair(DryRun=args.dry_run,
-                                  KeyName=args.deployment)
+    try:
+        keys = client.create_key_pair(DryRun=args.dry_run,
+                                      KeyName=args.deployment)
+    except botocore.exceptions.ClientError:
+        # Key probably already exists. Delete and re-create.
+        client.delete_key_pair(DryRun=args.dry_run, KeyName=args.deployment)
+        keys = client.create_key_pair(DryRun=args.dry_run,
+                                      KeyName=args.deployment)
+
     keymat = keys['KeyMaterial']
     keys = ec2.KeyPair(keys['KeyName'])
 

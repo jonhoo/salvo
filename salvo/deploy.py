@@ -27,7 +27,8 @@ class Deployer:
                 print("[{}]".format(topology.clusters[ci].name), file=hosts)
                 for instance in cluster:
                     if not topology.clusters[ci].internet:
-                        print(instance.private_ip_address, file=hosts)
+                        print('{}'.format(instance.private_ip_address),
+                              file=hosts)
                     else:
                         print(
                             "{} # eip = {}".format(

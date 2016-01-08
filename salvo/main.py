@@ -31,6 +31,8 @@ def main(argv=None):
     parser.add_argument('--playbook', '-p', type=argparse.FileType('r'),
                         default='./deploy/playbook.yml',
                         help='directory where playbooks reside')
+    parser.add_argument('--wait', '-w', default=False, action='store_true',
+                        help='wait for [Enter] before cleaning up')
     parser.add_argument('--deployment', '-d', type=str, default='salvo',
                         help='deployment name for this salvo')
     parser.add_argument('--set', '-s', nargs='*', type=str,
@@ -262,8 +264,9 @@ def main(argv=None):
     finally:
         agenda.section("Clean up VPC")
 
-        agenda.prompt("Press [Enter] when you are ready to clean")
-        input()
+        if args.wait:
+            agenda.prompt("Press [Enter] when you are ready to clean")
+            input()
 
         # Terminate instances and delete VPC resources
         agenda.task("Terminate all instances")

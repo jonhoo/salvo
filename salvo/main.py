@@ -277,7 +277,7 @@ def main(argv=None):
                 if i.state['Name'] != 'terminated':
                     agenda.subtask("At least one instance still shutting down")
                     still_running = True
-                    sleep(2)
+                    sleep(3)
                     break
 
         agenda.task("Delete network resources")

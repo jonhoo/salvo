@@ -111,6 +111,7 @@ control_path = ~/.ssh/mux-%r@%h:%p
             [
                 sys.argv[0],
                 '-i', 'inventory',
+                '-f', '10',
                 self.playbook
             ]
         )

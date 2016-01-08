@@ -17,10 +17,7 @@ provisioning a single machine might look like this:
 ```json
 {
 	"clusters": [
-		{
-			"public": true,
-			"name": "master",
-		}
+		{ "name": "master" }
 	]
 }
 ```
@@ -31,7 +28,7 @@ A more involved example might look as follows:
 {
 	"clusters": [
 		{
-			"public": true,
+			"expose": [22, 80],
 			"name": "master",
 		},
 		{
@@ -40,11 +37,18 @@ A more involved example might look as follows:
 		},
 		{
 			"count": 10,
+			"internet": false,
 			"name": "reducers",
 		}
 	]
 }
 ```
+
+By default, all machines will be given a public IP address, but no
+inbound connection attempts are allowed. To expose port to the outside
+world, set the `expose` attribute. Machines in clusters marked with
+`internet: false` will not be given a public IP, and cannot have exposed
+ports.
 
 Salvo always provisions one extra host called `hq`, in its own cluster,
 which has a public IP address, and which exposes SSH over the internet.

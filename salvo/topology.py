@@ -33,7 +33,8 @@ class Cluster:
     def __init__(self, name, attrs, params):
         self.name = name
         self.attrs = {
-            "public": False,
+            "expose": False,
+            "internet": True,
             "image": "ami-d05e75b8",  # Ubuntu Server 14.04 LTS
             "itype": "t2.nano",
             "count": 1,
@@ -47,6 +48,8 @@ class Cluster:
                     self.attrs[k] = attrs[k]
             elif k != "name":
                 raise KeyError("Unknown cluster attribute '{}'".format(k))
+
+        assert not self.attrs['expose'] or self.attrs['internet']
 
     def __getattr__(self, name):
         if name in self.attrs:

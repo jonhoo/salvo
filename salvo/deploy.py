@@ -26,13 +26,17 @@ class Deployer:
             for ci, cluster in enumerate(clusters):
                 print("[{}]".format(topology.clusters[ci].name), file=hosts)
                 for instance in cluster:
-                    print(
-                        "{}".format(
-                            instance.private_ip_address if ci != 0 else
-                            instance.public_ip_address
-                        ),
-                        file=hosts
-                    )
+                    if not topology.clusters[ci].internet:
+                        print(instance.private_ip_address, file=hosts)
+                    else:
+                        print(
+                            "{} # eip = {}".format(
+                                instance.public_ip_address if ci == 0 else
+                                instance.private_ip_address,
+                                instance.public_ip_address
+                            ),
+                            file=hosts
+                        )
                 print("", file=hosts)
 
         # Write out SSH key

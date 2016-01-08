@@ -45,7 +45,7 @@ def main(argv=None):
     topology = Topology.load_file(args.config, args.set)
 
     hq = Cluster('hq', {
-        'public': True,
+        'expose': [22],
     }, {})
     topology.clusters = [hq] + topology.clusters
 
@@ -59,27 +59,6 @@ def main(argv=None):
     vpc = client.create_vpc(DryRun=args.dry_run, CidrBlock='10.0.0.0/16')
     vpc = ec2.Vpc(vpc['Vpc']['VpcId'])
 
-    # allow ssh to all hosts
-    agenda.task("Create network security group")
-    sec = vpc.create_security_group(
-        DryRun=args.dry_run,
-        GroupName=args.deployment,
-        Description='Worker SSH and hq ingress in {}'.format(args.deployment)
-    )
-    sec.authorize_ingress(DryRun=args.dry_run,
-                          IpProtocol='tcp',
-                          FromPort=22,
-                          ToPort=22,
-                          CidrIp='0.0.0.0/0'
-                          )
-    # allow all internal traffic
-    sec.authorize_ingress(DryRun=args.dry_run,
-                          IpProtocol='tcp',
-                          FromPort=1,
-                          ToPort=65535,
-                          CidrIp='10.0.0.0/16'
-                          )
-
     agenda.task("Attach VPC internet gateway")
     gateway = client.create_internet_gateway(DryRun=args.dry_run)
     gateway = ec2.InternetGateway(
@@ -87,23 +66,51 @@ def main(argv=None):
     )
     gateway.attach_to_vpc(DryRun=args.dry_run, VpcId=vpc.id)
 
-    agenda.task("Create internet-enabled route for public instances")
+    agenda.task("Create internet-enabled route table")
     iroutable = vpc.create_route_table(DryRun=args.dry_run)
     iroutable.create_route(DryRun=args.dry_run,
                            DestinationCidrBlock='0.0.0.0/0',
                            GatewayId=gateway.id)
 
     subnets = []
+    secs = []
     for i, c in enumerate(topology.clusters):
         agenda.task("Allocate subnet #{}".format(i+1))
         subnet = vpc.create_subnet(DryRun=args.dry_run,
                                    CidrBlock='10.0.{}.0/24'.format(i))
 
-        if c.public:
+        if c.internet:
             agenda.subtask("Hook in internet-enable route table")
             iroutable.associate_with_subnet(DryRun=args.dry_run,
                                             SubnetId=subnet.id)
 
+        # set up security croups
+        agenda.subtask("Create network security group")
+        sec = vpc.create_security_group(
+            DryRun=args.dry_run,
+            GroupName='{}-cluster-{}'.format(args.deployment, i+1),
+            Description='Ingress rules for cluster {}-{}'
+                        .format(args.deployment, c.name)
+        )
+        # allow all internal traffic
+        sec.authorize_ingress(DryRun=args.dry_run,
+                              IpProtocol='tcp',
+                              FromPort=1,
+                              ToPort=65535,
+                              CidrIp='10.0.0.0/16'
+                              )
+
+        if c.expose is not False:
+            for p in c.expose:
+                agenda.subtask("Allow ingress traffic on port {}".format(p))
+                sec.authorize_ingress(DryRun=args.dry_run,
+                                      IpProtocol='tcp',
+                                      FromPort=p,
+                                      ToPort=p,
+                                      CidrIp='0.0.0.0/0'
+                                      )
+
+        secs.append(sec)
         subnets.append(subnet)
 
     # Tag all our VPC resources
@@ -111,10 +118,10 @@ def main(argv=None):
     ec2.create_tags(DryRun=args.dry_run,
                     Resources=[
                         vpc.id,
-                        sec.id,
                         gateway.id,
                         iroutable.id,
-                    ] + [sn.id for sn in subnets],
+                    ] +
+                    [sn.id for sn in subnets] + [sg.id for sg in secs],
                     Tags=[{
                         'Key': 'salvo',
                         'Value': args.deployment,
@@ -145,10 +152,10 @@ def main(argv=None):
         nics = [
             {
                 "DeviceIndex": 0,
-                "Groups": [sec.id],
+                "Groups": [secs[i].id],
                 "SubnetId": subnets[i].id,
                 "DeleteOnTermination": True,
-                "AssociatePublicIpAddress": c.public,
+                "AssociatePublicIpAddress": c.internet,
             }
         ]
 
@@ -170,6 +177,7 @@ def main(argv=None):
                )['Instances']
         ])))
 
+    exit = 1
     try:
         agenda.task("Wait for HQ to start running")
 
@@ -291,8 +299,9 @@ def main(argv=None):
             agenda.subfailure("failed to delete subnet:")
             import traceback
             traceback.print_exc()
-        agenda.subtask("security group")
-        sec.delete()
+        agenda.subtask("security groups")
+        for sg in secs:
+            sg.delete()
         agenda.subtask("network interfaces")
         for i in vpc.network_interfaces.all():
             i.delete(DryRun=args.dry_run)

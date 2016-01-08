@@ -95,7 +95,6 @@ control_path = ~/.ssh/mux-%r@%h:%p
                 '-i', 'inventory',
                 target,
                 '-m', 'ping',
-                '-vvvv',
                 '-o'
             ]
         )
@@ -112,7 +111,6 @@ control_path = ~/.ssh/mux-%r@%h:%p
             [
                 sys.argv[0],
                 '-i', 'inventory',
-                '-vvvv',
                 self.playbook
             ]
         )

@@ -8,6 +8,26 @@ playbook](https://docs.ansible.com/ansible/playbooks_intro.html)
 Once all the launched processes have finished, Salvo terminates the EC2
 machines and cleans up the VPC.
 
+## Quick Start
+
+Install Salvo:
+
+ 1. `git clone https://github.com/jonhoo/salvo.git && cd salvo`
+ 2. `virtualenv env`
+ 3. `env/bin/pip install -e git+https://github.com/ansible/ansible.git@devel#egg=ansible-2.1.0`
+ 4. `env/bin/pip install -e .`
+
+Write configuration files:
+
+ 1. Create an `ec2.json` file (see *Machine provisioning* below)
+ 2. Create an Ansible playbook file (see *Machine configuration* below)
+
+Run Salvo:
+
+```
+env/bin/salvo --playbook /path/to/playbook.yml /path/to/ec2.json
+```
+
 ## Machine provisioning
 
 Salvo requires you to specify the machine topology you want through a

@@ -21,6 +21,11 @@ Write configuration files:
 
  1. Create an `ec2.json` file (see *Machine provisioning* below)
  2. Create an Ansible playbook file (see *Machine configuration* below)
+ 3. Store your
+    [Amazon credentials](https://docs.aws.amazon.com/aws-sdk-php/v2/guide/credentials.html#credential-profiles)
+    in `~/.aws/credentials`. Instructions on how to get your credentials
+    can be found
+    [here](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-getting-set-up.html#d0e1950).
 
 Run Salvo:
 
